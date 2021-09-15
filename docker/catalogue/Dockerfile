@@ -1,44 +1,26 @@
-FROM golang:1.7
+FROM golang:1.16-buster AS build
 
-COPY . /go/src/github.com/microservices-demo/catalogue
-WORKDIR /go/src/github.com/microservices-demo/catalogue
+WORKDIR /app
+COPY go.mod ./
+COPY go.sum ./
+RUN go env -w GOPROXY=direct && go mod download
+COPY . .
 
-RUN go get -u github.com/FiloSottile/gvt
-RUN gvt restore && \
-    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /app github.com/microservices-demo/catalogue/cmd/cataloguesvc
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /catalogue cmd/cataloguesvc/main.go
+RUN chmod +x /catalogue && chown 65534:65534 /catalogue && \
+        setcap CAP_NET_BIND_SERVICE=+eip /catalogue && \
+        chown -R 65534:65534 images
 
-FROM alpine:3.4
 
-ENV	SERVICE_USER=myuser \
-	SERVICE_UID=10001 \
-	SERVICE_GROUP=mygroup \
-	SERVICE_GID=10001
 
-RUN	addgroup -g ${SERVICE_GID} ${SERVICE_GROUP} && \
-	adduser -g "${SERVICE_NAME} user" -D -H -G ${SERVICE_GROUP} -s /sbin/nologin -u ${SERVICE_UID} ${SERVICE_USER}
+FROM debian:11
 
 WORKDIR /
-COPY --from=0 /app /app
-COPY images/ /images/
+COPY --from=build /catalogue /catalogue
+COPY --from=build /app/images /images
 
-RUN	chmod +x /app && \
-	chown -R ${SERVICE_USER}:${SERVICE_GROUP} /app /images
+USER 65534
 
-USER ${SERVICE_USER}
+CMD ["/catalogue", "-port=8080"]
 
-ARG BUILD_DATE
-ARG BUILD_VERSION
-ARG COMMIT
-
-LABEL org.label-schema.vendor="Weaveworks" \
-  org.label-schema.build-date="${BUILD_DATE}" \
-  org.label-schema.version="${BUILD_VERSION}" \
-  org.label-schema.name="Socks Shop: Catalogue" \
-  org.label-schema.description="REST API for Catalogue service" \
-  org.label-schema.url="https://github.com/microservices-demo/catalogue" \
-  org.label-schema.vcs-url="github.com:microservices-demo/catalogue.git" \
-  org.label-schema.vcs-ref="${COMMIT}" \
-  org.label-schema.schema-version="1.0"
-
-CMD ["/app", "-port=8080"]
 EXPOSE 8080
